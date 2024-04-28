@@ -1,0 +1,763 @@
+---
+title: "Final Assignment - Code"
+output: html_document
+date: "2024-04-28"
+---
+
+Reading the original file and selecting the songs that are:
+- between years 1940 and 2019
+- removing "misc" genre
+- Selecting only songs in English
+- Selecting only songs that have more than 50 views
+
+Saving the result of this filter as "sub_songs"
+
+After that, selecting the top 250 songs of each year and saving the resulting dataset as "top_songs_per_year"
+
+```{r}
+# #all_songs <- read_csv(unz("archive_2.zip", "song_lyrics.csv"))
+# all_songs <- read_csv("song_lyrics.csv")
+# sub_songs <- all_songs[all_songs$year >= 1940 & all_songs$year <= 2019 & all_songs$tag != "misc" & all_songs$views > 50 & all_songs$language == "en",]
+#
+# Visualizing the data format
+# table(sub_songs$language)
+# table(sub_songs$year)
+# table(sub_songs$tag)
+# str(sub_songs)
+#
+# Subsetting the 250 top songs per year
+# top_songs_per_year <- sub_songs %>%
+#   arrange(year, desc(views)) %>%
+#   group_by(year) %>%
+#   slice_head(n = 250) %>%
+#   ungroup()
+#
+# #since not all years have 250 songs, we need to remove the rows that are empty
+# top_songs_per_year <- top_songs_per_year[complete.cases(top_songs_per_year),]
+#
+# # View the first few rows of the new dataset
+# head(top_songs_per_year)
+# table(top_songs_per_year$tag, top_songs_per_year$year)
+#
+# saveRDS(sub_songs, "sub_songs.rds")
+# saveRDS(top_songs_per_year, "top_songs_per_year.rds")
+
+# Loading the data from the RDS files
+#sub_songs <- readRDS("sub_songs.rds")
+top_songs_per_year <- readRDS("top_songs_per_year.rds")
+```
+
+Analysing the data, to see the distribution of genres throughout the years to create the Plot 1 of the final assignment
+
+```{r}
+# Summarizing the data
+tag_counts_per_year <- top_songs_per_year %>%
+  group_by(year, tag) %>%
+  summarise(count = n(), .groups = 'drop')
+
+tag_counts_per_year <- tag_counts_per_year %>%
+  mutate(clean_tag = case_when(
+    tag == "country" ~ "Country",
+    tag == "pop" ~ "Pop",
+    tag == "rap" ~ "Rap",
+    tag == "rb" ~ "R&B",
+    tag == "rock" ~ "Rock",
+    TRUE ~ as.character(tag)  # Keeps the tag unchanged if it doesn't match any of the specified values
+  ))
+
+# Define a new, softer color palette
+color_palette <- brewer.pal(min(n_distinct(tag_counts_per_year$clean_tag), 8), "Set1")
+
+plot1 <- ggplot(tag_counts_per_year, aes(x = year, y = count, group = clean_tag, color = clean_tag)) +
+  geom_line(size = 1) + # Keep lines slightly thicker for visibility
+  scale_color_manual(values = color_palette) + # Apply the new color palette
+  theme_minimal(base_size = 14) + # Continue with a minimal theme and readable base font size
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    plot.title = element_text(face = "bold", hjust = 0, size = 16),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title = element_text(size = 14)
+  ) +
+  labs(
+    title = "Plot 1: Genres of Most Popular Songs of the Year",
+    x = "Year",
+    y = "Number of Songs"
+  ) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) # Adjust x-axis breaks for readability
+
+ggsave("plot1.png", plot1, width = 10, height = 5, dpi = 300)
+
+```
+Starting pre processing of the dataset
+
+```{r, eval = FALSE}
+# Checking the format of the lyrics for pre processing
+head(top_songs_per_year$lyrics)
+```
+
+Identifying the number of lines and cleaning the lyrics of the dataset
+
+```{r}
+#removing the information in square brackets
+lyrics_clean <- gsub("\\[.*?\\]", "", top_songs_per_year$lyrics)
+
+#Getting the number of lines of the song
+all_n_lines <- sapply(lyrics_clean, function(x){
+  #Splitting the song into lines
+  split_song <- strsplit(x, "\n")[[1]]
+  #Getting the number of lines in the song
+  lines <- length(split_song)[split_song != ""]
+  n_lines <- length(lines)
+  return(n_lines)
+  })
+
+#replacing the new line characters with a space
+lyrics_clean <- gsub("\n", " ", lyrics_clean)
+
+#including the new info in the dataset
+top_songs_per_year$n_lines <- all_n_lines
+top_songs_per_year$clean_lyrics <- lyrics_clean
+```
+
+
+```{r}
+#Pre processing and creating corpus and dfm
+corpus <- corpus(top_songs_per_year,
+                 text_field = "clean_lyrics")
+
+toks <- tokens(corpus, remove_punct = TRUE, remove_url=TRUE, remove_numbers = TRUE, remove_symbols = TRUE,  verbose=TRUE)
+
+toks <- tokens_remove(toks, pattern = c(stopwords("en"), "t.co", "https", "rt", "amp", "http", "t.c", "can", "u", "t", "htt", "s", "w", "y"))
+
+dfm <- dfm(toks, verbose=TRUE, tolower = TRUE)
+docnames(dfm) <- paste(top_songs_per_year$title, top_songs_per_year$year, sep = " - ")
+docvars(dfm)
+```
+
+
+```{r}
+# Selecting the most repetitive songs from the dataset
+# The Trashmen, “Surfin’ Bird” (1963)
+surfin_bird <- which(top_songs_per_year$artist == "The Trashmen")
+print(top_songs_per_year[which(top_songs_per_year$artist == "The Trashmen"),])
+
+# Foo Fighters, “Best of You” (2005)
+best_of_you <- which(top_songs_per_year$title == "Best of You")
+print(top_songs_per_year[which(top_songs_per_year$title == "Best of You"),])
+
+# Red Hot Chili Peppers, “Give It Away” (1991)
+give_it_away <- which(top_songs_per_year$artist == "Red Hot Chili Peppers" & top_songs_per_year$title == "Give It Away")
+print(top_songs_per_year[which(top_songs_per_year$artist == "Red Hot Chili Peppers" & top_songs_per_year$title == "Give It Away"),])
+```
+
+```{r}
+# Selecting complex songs
+bohe <- which(top_songs_per_year$title == "Bohemian Rhapsody")
+stair <- which(top_songs_per_year$title == "Stairway to Heaven" & top_songs_per_year$artist == "Led Zeppelin")
+hurrycane <- which(top_songs_per_year$title == "Hurricane")
+
+#subsetting the repetitive and complex songs
+complex_subset <- c(bohe, stair, hurrycane)
+rep_subset <- c(surfin_bird, best_of_you, give_it_away)
+
+method_eval <- top_songs_per_year[c(complex_subset, rep_subset),]
+```
+
+
+```{r}
+library(brotli)
+
+#Measuring compression
+method_eval$compression_rate <- sapply(method_eval$clean_lyrics, function(x){
+  #Transforming to raw
+  to_raw <- charToRaw(x)
+  original_length <- length(to_raw)
+  compressed <- brotli_compress(to_raw, quality = 11, window = 22)
+  compressed_length <- length(compressed)
+  return(1 -(compressed_length/original_length))
+})
+```
+
+
+```{r}
+#Subseting the dfm
+selected_dfm <- dfm[c(rep_subset, complex_subset),]
+
+# Counting the total unique words per song
+# same as the number of columns that have value greater than zero
+tot_unique_words <- rowSums(selected_dfm > 0)
+
+# Average word repetition in a song
+# Initialize an empty vector to store the average word repetition for each selected song
+avg_word_repetition <- numeric(nrow(selected_dfm))
+
+# For every row of the dfm
+for (i in 1:nrow(selected_dfm)) {
+  # Select the row
+  row <- selected_dfm[i, ]
+  
+  # Remove columns that are equal to zero
+  non_zero_values <- row[row > 0]
+  
+  # Calculate the average of the row
+  avg_word_repetition[i] <- mean(non_zero_values)
+}
+
+#Lexical Diversity - Total Unique words/total words
+lexical_diversity <- tot_unique_words/rowSums(selected_dfm)
+
+#Readability
+subset <- top_songs_per_year$lyrics[c(rep_subset, complex_subset)]
+readability <- textstat_readability(subset, "meanWordSyllables")[,2]
+
+#average unique words per line
+subset_n_lines <- top_songs_per_year$n_lines[c(rep_subset, complex_subset)]
+avg_unique_words_per_line <- tot_unique_words/subset_n_lines
+
+#Including new variables in the dataset
+method_eval$unique_words <- tot_unique_words
+method_eval$avg_word_repetition <- avg_word_repetition
+method_eval$lexical_diversity <- lexical_diversity
+method_eval$readability <- readability
+method_eval$avg_unique_words_per_line <- as.numeric(avg_unique_words_per_line)
+
+```
+
+
+```{r}
+songs_data_long <- pivot_longer(plot_data, cols=c(unique_words, avg_word_repetition, lexical_diversity, readability, avg_unique_words_per_line), names_to="Measure", values_to="Value")
+
+value_map <- c(compression_rate = "Compression Rate",
+               unique_words = "Total Unique Words",
+               avg_word_repetition = "Avg Word Repetition",
+               lexical_diversity = "Lexical Diversity",
+               readability = "Readability",
+               avg_unique_words_per_line = "Avg Unique Words per Line")
+
+songs_data_long <- songs_data_long %>%
+  mutate(Measure = recode(Measure, !!!value_map))
+
+# Create violin plots for all measures, faceted by Measure
+p <- ggplot(songs_data_long, aes(x=category, y=Value, fill=category)) +
+  geom_violin(trim=TRUE) +  # trim=FALSE shows the full distribution
+  facet_wrap(~Measure, scales="free_y", ncol=2) +  # Adjust the number of columns if needed
+  labs(title="Plot 2: Song Measures by Category",
+       x="",
+       y="Value",
+       fill="") +
+  theme_minimal(base_size = 14) +  # Increase base font size
+  scale_fill_manual(values=c("Repetitive"="blue", "Complex"="orange")) +
+  theme(legend.position="",  # Move legend to the bottom
+        strip.text.x = element_text(size = 11, face = "bold"),  # Customize facet labels
+        axis.text.x = element_text(angle = 45, hjust = 1),  # Tilt x axis texts for better readability
+        legend.title = element_blank(),
+        plot.title = element_text(hjust = 0.5),)  # Center plot title
+
+# Print the plot
+print(p)
+
+# Save the plot with adjusted dimensions and higher resolution
+ggsave("plot3_violin.png", plot = p, width = 6, height = 6, dpi = 300)
+
+
+```
+
+
+```{r}
+#Measuring unique words per song
+tot_unique_words <- rowSums(dfm > 0)
+
+#Average word repetition in a song
+# Initialize an empty vector to store the average word repetition for each selected song
+avg_word_repetition <- numeric(nrow(dfm))
+
+# For every row of the dfm
+for (i in 1:nrow(dfm)) {
+  # Select the row
+  row <- dfm[i, ]
+  
+  # Remove columns that are equal to zero
+  non_zero_values <- row[row > 0]
+  
+  # Calculate the average of the row (assuming you want to exclude any non-numeric first column, which should not be present in a typical DFM)
+  # Since DFMs are numeric matrices, you can directly calculate the average of non-zero values
+  avg_word_repetition[i] <- mean(non_zero_values)
+}
+
+#Lexical Diversity - Unique words/total words
+lexical_diversity <- tot_unique_words/rowSums(dfm)
+
+#average unique words per line
+avg_unique_words_per_line <- tot_unique_words/top_songs_per_year$n_lines
+
+#Readability
+library(quanteda.textstats)
+# subset <- top_songs_per_year$lyrics
+# b <- gsub("\n", " ", subset)
+# b <- gsub("\\[.*?\\]", "", b)
+
+readability <- textstat_readability(top_songs_per_year$clean_lyrics, "meanWordSyllables")[,2]
+
+#Including new variables in the dataset
+top_songs_per_year$unique_words <- tot_unique_words
+top_songs_per_year$avg_word_repetition <- avg_word_repetition
+top_songs_per_year$lexical_diversity <- lexical_diversity
+top_songs_per_year$readability <- readability
+top_songs_per_year$avg_unique_words_per_line <- avg_unique_words_per_line
+top_songs_per_year$decade <- paste(substr(top_songs_per_year$year, 1, 3), "0s", sep = "")
+
+top_songs_per_year <- top_songs_per_year %>%
+  mutate(clean_tag = case_when(
+    tag == "country" ~ "Country",
+    tag == "pop" ~ "Pop",
+    tag == "rap" ~ "Rap",
+    tag == "rb" ~ "R&B",
+    tag == "rock" ~ "Rock",
+    TRUE ~ as.character(tag)  # Keeps the tag unchanged if it doesn't match any of the specified values
+  ))
+
+
+```
+Making the plots
+
+
+```{r}
+library(ggplot2)
+library(patchwork)
+
+plot_list <- list()
+measures <- c("unique_words", "avg_word_repetition", "lexical_diversity", "readability", "avg_unique_words_per_line")
+clean_measures <- c("Unique Words", "Average Word Repetition", "Lexical Diversity", "Readability", "Average Unique Words per Line")
+
+for (measure in measures) {
+  i <- which(measures == measure)
+  p <- ggplot(top_songs_per_year, aes(x = year, y = .data[[measure]], color = clean_tag)) +
+    geom_point(size = .5, alpha = .8) +
+    theme_minimal() +
+    labs(title = paste(i, ". ", clean_measures[i], "Over Time"), x = "", y = "")+
+    theme(legend.title = element_blank(), legend.position = "bottom",
+          title = element_text(size = 8, hjust = 0.5),
+          axis.text.y = element_text(size = 6))
+  
+  # Remove the legend except for the first plot
+  if (measure != measures[5]) {
+    p <- p + theme(legend.position = "none")
+  }
+  
+  plot_list[[measure]] <- p
+}
+
+# Combine all plots, keeping the legend only in the first plot
+plot_grid <- wrap_plots(plot_list, ncol = 2)
+
+# Print the combined plot
+#plot_grid
+
+# Add a common title with plot_annotation() and adjust the layout with plot_layout()
+plot_grid <- plot_grid + 
+  plot_annotation(
+    title = "Plot 3: Evolution of Musical Attributes Over Time",
+    theme = theme(
+      plot.title = element_text(hjust = 0, face = "bold")
+    )
+  )
+
+  # Display the combined plot with the common title
+print(plot_grid)
+
+# Save the plot as a PNG file
+ggsave("./plots/plot3_combined_plot.png", plot_grid, width = 16, height = 14 , units = "cm", dpi = 450)
+
+```
+
+
+```{r}
+#Unique words plot
+p_uni <- ggplot(top_songs_per_year, aes(x = decade, y = unique_words)) +
+  geom_boxplot(outlier.colour = "gray45", colour = "gray35", outlier.size = .7) +
+  #scale_y_log10() +  # Transform the y-axis to a log scale
+  scale_y_continuous(limits = c(0,400))+
+  theme_minimal() +
+theme(title = element_text(size = 8, hjust = 0.5),
+          axis.text.y = element_text(size = 6,),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  #scale_x_discrete(breaks = c(1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020))+
+  #facet_wrap(~clean_tag, scales = "free_y") +
+  labs(title = paste("1. Total Unique Words Distribution Over Time"), x = "", y = "")
+print(p_uni)
+
+p_rep <- ggplot(top_songs_per_year, aes(x = decade, y = avg_word_repetition)) +
+  geom_boxplot(outlier.colour = "gray85", colour = "gray35", outlier.size = .7) +
+  #scale_y_log10() +  # Transform the y-axis to a log scale
+  scale_y_continuous(limits = c(0,5))+
+  theme_minimal() +
+  theme(title = element_text(size = 8, hjust = 0.5),
+          axis.text.y = element_text(size = 6),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  #scale_x_discrete(breaks = c(1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020))+
+  #facet_wrap(~clean_tag, scales = "free_y") +
+  labs(title = paste("2. Average Word Repetition"), x = "", y = "")
+print(p_rep)
+
+p_lex <- ggplot(top_songs_per_year, aes(x = decade, y = lexical_diversity)) +
+  geom_boxplot(outlier.colour = "gray85", colour = "gray35", outlier.size = .7) +
+  #scale_y_log10() +  # Transform the y-axis to a log scale
+  scale_y_continuous(limits = c(0,1.2))+
+  theme_minimal() +
+  theme(title = element_text(size = 8, hjust = 0.5),
+          axis.text.y = element_text(size = 6),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  #scale_x_discrete(breaks = c(1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020))+
+  #facet_wrap(~clean_tag, scales = "free_y") +
+  labs(title = paste("3. Lexical DiversityOver Time"), x = "", y = "")
+p_lex
+
+p_read <- ggplot(top_songs_per_year, aes(x = decade, y = readability)) +
+  geom_boxplot(outlier.colour = "gray85", colour = "gray35", outlier.size = .7) +
+  #scale_y_log10() +  # Transform the y-axis to a log scale
+  scale_y_continuous(limits = c(1.1,1.3))+
+  theme_minimal() +
+theme(title = element_text(size = 8, hjust = 0.5),
+          axis.text.y = element_text(size = 6),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  #scale_x_discrete(breaks = c(1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020))+
+  #facet_wrap(~clean_tag, scales = "free_y") +
+  labs(title = paste("4. Mean Word Syllables Over Time"), x = "", y = "")
+p_read
+
+p_avg <- ggplot(top_songs_per_year, aes(x = decade, y = avg_unique_words_per_line)) +
+  geom_boxplot(outlier.colour = "gray85", colour = "gray35", outlier.size = .7) +
+  #scale_y_log10() +  # Transform the y-axis to a log scale
+  scale_y_continuous(limits = c(0,5))+
+  theme_minimal() +
+theme(title = element_text(size = 8, hjust = 0.5),
+          axis.text.y = element_text(size = 6),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  #scale_x_discrete(breaks = c(1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020))+
+  #facet_wrap(~clean_tag, scales = "free_y") +
+  labs(title = paste("5. Unique Words per Line Over Time"), x = "", y = "")
+p_avg
+
+plot_grid <- p_uni + p_rep + p_lex + p_read + p_avg +
+  plot_annotation(
+    title = "Plot 4: Distribution of Musical Attributes Over Time",
+    theme = theme(
+      plot.title = element_text(hjust = 0, face = "bold")
+    )
+  ) + plot_layout(ncol = 2)
+
+  # Display the combined plot with the common title
+print(plot_grid)
+
+# Save the plot as a PNG file
+ggsave("./plots/4_combined_plot_box_plot.png", plot_grid, width = 16, height = 17 , units = "cm", dpi = 450)
+
+```
+
+Making genre wordcloud
+
+
+```{r warning=FALSE}
+library(quanteda.textplots)
+docvars(dfm)$clean_tag <- top_songs_per_year$clean_tag
+dfm_grouped <- dfm_group(dfm, groups = docvars(dfm)$clean_tag)
+textplot_wordcloud(dfm_grouped, comparison = TRUE)
+```
+
+```{r warning=FALSE}
+
+par(mar = c(2, 1, 2, 1))
+for (i in unique(docvars(dfm)$clean_tag)) {
+    # Generate a word cloud for each unique tag
+    textplot_wordcloud(
+      dfm_subset(dfm, docvars(dfm)$clean_tag == i), 
+      min_count = 10,
+      max_words = 100,
+      color = brewer.pal(8, "Dark2"),
+      scale = c(8, 2)
+    )
+    # Add title using base R function
+print(paste("Wordcloud for", i))
+}
+```
+
+```{r}
+color_palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2")
+
+# Adjusted plot to improve visibility of the regression line
+p_uni <- ggplot(top_songs_per_year, aes(x = year, y = unique_words, color = clean_tag)) +
+  geom_point(alpha = 0.1, size = 2) +
+  #geom_jitter(alpha = 0.1, size = 2) +  # Use jitter to differentiate overlapping points
+  geom_smooth(method = "lm", se = FALSE, color = "red", size = .5, aes(group = 1)) +  # Regression line across all data
+  facet_wrap(~clean_tag, scales = "free_y", nrow = 1) +
+  scale_color_manual(values = color_palette) +  # Apply custom colors
+  theme_minimal() +
+  labs(title = "Plot 6.1: Unique Words Over Time", x = "Year", y = "") +
+  scale_y_continuous(limits = c(0, 250)) +  # Adjusted limits to fit data
+  scale_x_discrete(breaks = c(1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +  # Adjusted x-axis breaks
+  theme(axis.text.x = element_text(angle = 45, size = 7, hjust = 1),
+        legend.position = "none",
+        plot.title = element_text(size = 14, face = "bold", hjust = 0))# Adjusted x-axis breaks
+
+print(p_uni)
+ggsave("./plots/61_unique_words_genre_point.png", p_uni, width = 20, height = 7, units = "cm", dpi = 450)
+```
+
+```{r}
+library(ggplot2)
+
+p_uni_box <- ggplot(top_songs_per_year, aes(x = decade, y = unique_words, fill = clean_tag)) +
+  geom_boxplot(alpha = 0.7, outlier.size = .7) +  # Add transparency to the boxplots
+  scale_y_continuous(limits = c(0, 250)) +  # Adjust y-axis limits
+  scale_fill_manual(values = color_palette) +  # Use a custom color palette
+  theme_minimal(base_size = 14) +  # Use a minimal theme with a larger base font size
+  theme(
+    axis.title = element_text(size = 14),  # Make axis titles larger
+    axis.text = element_text(size = 12),  # Increase axis text size
+    plot.title = element_text(size = 16, face = "bold", hjust = 0),  # Increase plot title size and make it bold
+    legend.position = "",  # Move legend to the bottom
+    strip.background = element_blank(),  # Remove background from facet labels
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 7, angle = 45, hjust = 1) # Bold facet labels
+  ) +
+  facet_wrap(~clean_tag, scales = "free_y", nrow = 1) +  # Organize facets in a 3-column layout
+  labs(
+    title = "Plot 6.2: Unique Words per Decade",
+    x = "Decade",
+    y = ""
+  ) #+
+ # guides(fill = guide_legend(title = "Genre"))  # Add a title to the legend
+
+print(p_uni_box)
+ggsave("./plots/62_unique_words_box.png", p_uni_box, width = 20, height = 7, units = "cm", dpi = 450)
+```
+
+
+
+```{r}
+color_palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2")
+
+# Adjusted plot to improve visibility of the regression line
+p_rep <- ggplot(top_songs_per_year, aes(x = year, y = avg_word_repetition, color = clean_tag)) +
+  geom_point(alpha = 0.1, size = 2) +
+  #geom_jitter(alpha = 0.1, size = 2) +  # Use jitter to differentiate overlapping points
+  geom_smooth(method = "lm", se = FALSE, color = "red", size = .5, aes(group = 1)) +  # Regression line across all data
+  facet_wrap(~clean_tag, scales = "free_y", nrow = 1) +
+  scale_color_manual(values = color_palette) +  # Apply custom colors
+  theme_minimal() +
+  labs(title = "Plot 7.1: Average Word Repetition Over Time", x = "Year", y = "") +
+  scale_y_continuous(limits = c(0, 4)) +  # Adjusted limits to fit data
+  scale_x_discrete(breaks = c(1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +  # Adjusted x-axis breaks
+  theme(axis.text.x = element_text(angle = 45, size = 7, hjust = 1),
+        legend.position = "none",
+        plot.title = element_text(size = 14, face = "bold", hjust = 0))# Adjusted x-axis breaks
+
+print(p_rep)
+ggsave("./plots/71_word_rep_point.png", p_rep, width = 20, height = 7, units = "cm", dpi = 450)
+```
+
+
+```{r}
+library(ggplot2)
+
+# Define a nicer color palette, assuming we have five levels in clean_tag
+color_palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2")
+
+p_rep_box <- ggplot(top_songs_per_year, aes(x = decade, y = avg_word_repetition, fill = clean_tag)) +
+  geom_boxplot(alpha = 0.7, outlier.size = .7) +  # Add transparency to the boxplots
+  scale_y_continuous(limits = c(0.5 ,4)) +  # Adjust y-axis limits
+  scale_fill_manual(values = color_palette) +  # Use a custom color palette
+  theme_minimal(base_size = 14) +  # Use a minimal theme with a larger base font size
+  theme(
+    axis.title = element_text(size = 14),  # Make axis titles larger
+    axis.text = element_text(size = 12),  # Increase axis text size
+    plot.title = element_text(size = 16, face = "bold", hjust = 0),  # Increase plot title size and make it bold
+    legend.position = "",  # Move legend to the bottom
+    strip.background = element_blank(),  # Remove background from facet labels
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 7, angle = 45, hjust = 1) # Bold facet labels
+  ) +
+  facet_wrap(~clean_tag, scales = "free_y", nrow = 1) +  # Organize facets in a 3-column layout
+  labs(
+    title = "Plot 7.2: Average Word Repetition Over Time Per Genre",
+    x = "Decade",
+    y = ""
+  ) #+
+ # guides(fill = guide_legend(title = "Genre"))  # Add a title to the legend
+
+print(p_rep_box)
+ggsave("./plots/72_word_rep_box.png", p_rep_box, width = 20, height = 7, units = "cm", dpi = 450)
+```
+
+```{r}
+color_palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2")
+
+# Adjusted plot to improve visibility of the regression line
+p_lex <- ggplot(top_songs_per_year, aes(x = year, y = lexical_diversity, color = clean_tag)) +
+  geom_point(alpha = 0.1, size = 2) +
+  #geom_jitter(alpha = 0.1, size = 2) +  # Use jitter to differentiate overlapping points
+  geom_smooth(method = "lm", se = FALSE, color = "red", size = .5, aes(group = 1)) +  # Regression line across all data
+  facet_wrap(~clean_tag, scales = "free_y", nrow = 1) +
+  scale_color_manual(values = color_palette) +  # Apply custom colors
+  theme_minimal() +
+  labs(title = "Plot 8.1: Lexical Diversity Over Time", x = "Year", y = "") +
+  scale_y_continuous(limits = c(NA, NA)) +  # Adjusted limits to fit data
+  scale_x_discrete(breaks = c(1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +  # Adjusted x-axis breaks
+  theme(axis.text.x = element_text(angle = 45, size = 7, hjust = 1),
+        legend.position = "none",
+        plot.title = element_text(size = 14, face = "bold", hjust = 0))# Adjusted x-axis breaks
+
+print(p_lex)
+ggsave("./plots/81_lex_point.png", p_lex, width = 20, height = 7, units = "cm", dpi = 450)
+```
+
+
+```{r}
+library(ggplot2)
+
+# Define a nicer color palette, assuming we have five levels in clean_tag
+color_palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2")
+
+p_lex_box <- ggplot(top_songs_per_year, aes(x = decade, y = lexical_diversity, fill = clean_tag)) +
+  geom_boxplot(alpha = 0.7, outlier.size = .7) +  # Add transparency to the boxplots
+  #scale_y_continuous(limits = c(0.5 ,4)) +  # Adjust y-axis limits
+  scale_fill_manual(values = color_palette) +  # Use a custom color palette
+  theme_minimal(base_size = 14) +  # Use a minimal theme with a larger base font size
+  theme(
+    axis.title = element_text(size = 14),  # Make axis titles larger
+    axis.text = element_text(size = 12),  # Increase axis text size
+    plot.title = element_text(size = 16, face = "bold", hjust = 0),  # Increase plot title size and make it bold
+    legend.position = "",  # Move legend to the bottom
+    strip.background = element_blank(),  # Remove background from facet labels
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 7, angle = 45, hjust = 1) # Bold facet labels
+  ) +
+  facet_wrap(~clean_tag, scales = "free_y", nrow = 1) +  # Organize facets in a 3-column layout
+  labs(
+    title = "Plot 8.2: Lexical Diversity Over Per Decade",
+    x = "Decade",
+    y = ""
+  ) #+
+ # guides(fill = guide_legend(title = "Genre"))  # Add a title to the legend
+
+print(p_lex_box)
+ggsave("./plots/82_lex_box.png", p_lex_box, width = 20, height = 7, units = "cm", dpi = 450)
+
+```
+
+```{r}
+color_palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2")
+
+# Adjusted plot to improve visibility of the regression line
+p_read <- ggplot(top_songs_per_year, aes(x = year, y = readability, color = clean_tag)) +
+  geom_point(alpha = 0.1, size = 2) +
+  #geom_jitter(alpha = 0.1, size = 2) +  # Use jitter to differentiate overlapping points
+  geom_smooth(method = "lm", se = FALSE, color = "red", size = .5, aes(group = 1)) +  # Regression line across all data
+  facet_wrap(~clean_tag, scales = "free_y", nrow = 1) +
+  scale_color_manual(values = color_palette) +  # Apply custom colors
+  theme_minimal() +
+  labs(title = "Plot 9.1: Mean Word Syllables Over Time", x = "Year", y = "") +
+  scale_y_continuous(limits = c(1, 1.4)) +  # Adjusted limits to fit data
+  scale_x_discrete(breaks = c(1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +  # Adjusted x-axis breaks
+  theme(axis.text.x = element_text(angle = 45, size = 7, hjust = 1),
+        legend.position = "none",
+        plot.title = element_text(size = 14, face = "bold", hjust = 0))# Adjusted x-axis breaks
+
+print(p_read)
+ggsave("./plots/91_read_point.png", p_read, width = 20, height = 7, units = "cm", dpi = 450)
+```
+
+
+```{r}
+library(ggplot2)
+
+# Define a nicer color palette, assuming we have five levels in clean_tag
+color_palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2")
+
+p_read_box <- ggplot(top_songs_per_year, aes(x = decade, y = readability, fill = clean_tag)) +
+  geom_boxplot(alpha = 0.7, outlier.size = .7) +  # Add transparency to the boxplots
+  scale_y_continuous(limits = c(1.1 ,1.3)) +  # Adjust y-axis limits
+  scale_fill_manual(values = color_palette) +  # Use a custom color palette
+  theme_minimal(base_size = 14) +  # Use a minimal theme with a larger base font size
+  theme(
+    axis.title = element_text(size = 14),  # Make axis titles larger
+    axis.text = element_text(size = 12),  # Increase axis text size
+    plot.title = element_text(size = 16, face = "bold", hjust = 0),  # Increase plot title size and make it bold
+    legend.position = "",  # Move legend to the bottom
+    strip.background = element_blank(),  # Remove background from facet labels
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 7, angle = 45, hjust = 1) # Bold facet labels
+  ) +
+  facet_wrap(~clean_tag, scales = "free_y", nrow = 1) +  # Organize facets in a 3-column layout
+  labs(
+    title = "Plot 9.2: Mean Word Syllables Over Time Per Genre",
+    x = "Decade",
+    y = ""
+  ) #+
+ # guides(fill = guide_legend(title = "Genre"))  # Add a title to the legend
+
+print(p_read_box)
+ggsave("./plots/92_read_box.png", p_read_box, width = 20, height = 7, units = "cm", dpi = 450)
+```
+
+```{r}
+color_palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2")
+
+# Adjusted plot to improve visibility of the regression line
+p_avg <- ggplot(top_songs_per_year, aes(x = year, y = avg_unique_words_per_line, color = clean_tag)) +
+  geom_point(alpha = 0.1, size = 2) +
+  #geom_jitter(alpha = 0.1, size = 2) +  # Use jitter to differentiate overlapping points
+  geom_smooth(method = "lm", se = FALSE, color = "red", size = .5, aes(group = 1)) +  # Regression line across all data
+  facet_wrap(~clean_tag, scales = "free_y", nrow = 1) +
+  scale_color_manual(values = color_palette) +  # Apply custom colors
+  theme_minimal() +
+  labs(title = "Plot 10.1: Average Unique Words per Line Over Time", x = "Year", y = "") +
+  scale_y_continuous(limits = c(0.5, 4)) +  # Adjusted limits to fit data
+  scale_x_discrete(breaks = c(1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020))+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +  # Adjusted x-axis breaks
+  theme(axis.text.x = element_text(angle = 45, size = 7, hjust = 1),
+        legend.position = "none",
+        plot.title = element_text(size = 14, face = "bold", hjust = 0))# Adjusted x-axis breaks
+
+print(p_avg)
+ggsave("./plots/101_avg_uni_point.png", p_avg, width = 20, height = 7, units = "cm", dpi = 450)
+```
+
+
+```{r}
+library(ggplot2)
+
+# Define a nicer color palette, assuming we have five levels in clean_tag
+color_palette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2")
+
+p_avg_box <- ggplot(top_songs_per_year, aes(x = decade, y = avg_unique_words_per_line, fill = clean_tag)) +
+  geom_boxplot(alpha = 0.7, outlier.size = .7) +  # Add transparency to the boxplots
+  scale_y_continuous(limits = c(0.5,4)) +  # Adjust y-axis limits
+  scale_fill_manual(values = color_palette) +  # Use a custom color palette
+  theme_minimal(base_size = 14) +  # Use a minimal theme with a larger base font size
+  theme(
+    axis.title = element_text(size = 14),  # Make axis titles larger
+    axis.text = element_text(size = 12),  # Increase axis text size
+    plot.title = element_text(size = 16, face = "bold", hjust = 0),  # Increase plot title size and make it bold
+    legend.position = "",  # Move legend to the bottom
+    strip.background = element_blank(),  # Remove background from facet labels
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(size = 7, angle = 45, hjust = 1) # Bold facet labels
+  ) +
+  facet_wrap(~clean_tag, scales = "free_y", nrow = 1) +  # Organize facets in a 3-column layout
+  labs(
+    title = "Plot 10.2: Average Unique Words per Line Over Time",
+    x = "Decade",
+    y = ""
+  ) #+
+ # guides(fill = guide_legend(title = "Genre"))  # Add a title to the legend
+
+print(p_avg_box)
+ggsave("./plots/102_avg_uni_box.png", p_avg_box, width = 20, height = 7, units = "cm", dpi = 450)
+```
